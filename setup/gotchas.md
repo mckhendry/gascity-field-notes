@@ -12,7 +12,7 @@ Throughout, a Claude Code session ran `gc` for me. Several of these traps exist 
 
 ---
 
-## 1. Auto mode won't let a Claude Code session configure Gas City's agents
+## 1. A Claude Code session in auto mode won't configure Gas City's agents
 
 **Symptom.** A Claude Code session in auto mode tries to edit `<city-dir>/city.toml` (the `[providers.claude]` block) or write `<city-dir>/.claude/settings.json`. The auto-mode classifier denies the write as "Create Unsafe Agents". It denied the `city.toml` edit again after I typed a general go-ahead ("run the gas city build"). The hook file went through only after I typed an instruction naming that exact write ("write the guard hook").
 
@@ -65,7 +65,7 @@ option_defaults = { model = "<model-id>", effort = "medium", permission_mode = "
 
 `permission_mode` can also be `auto-edit` (`--permission-mode acceptEdits`) or `full-auto` (`--permission-mode dontAsk`) (code-read). The docs warn that a mode that blocks on approval can't finish unattended work. I kept `unrestricted` and pinned model and effort, so both sides of my comparison run at the same effort. Read the result back with `gc config explain --provider claude` (see #5).
 
-**How I verified.** The default is code-read, and the driving session confirmed it on my install. After the override, `gc config explain --provider claude` attributed model, effort, `permission_mode = unrestricted` and the env keys to `providers.claude`.
+**How I verified.** The default is code-read, and the session running `gc` confirmed it on my install. After the override, `gc config explain --provider claude` attributed model, effort, `permission_mode = unrestricted` and the env keys to `providers.claude`.
 
 ## 5. `gc config explain` hides provider settings unless you name the provider
 
@@ -147,19 +147,66 @@ This changes your global git config, not just this city's.
 
 **How I verified.** Code-read only.
 
+## 13. `gc rig add` commits to your rig's branch, then leaves it dirty
+
+**Symptom.** After `gc rig add`, the rig's branch has a commit you didn't make: "bd init: initialize beads issue tracking". It adds `.beads/.gitignore`, `.beads/README.md`, `.beads/config.yaml`, `.beads/metadata.json` and seven lines of `.gitignore` (the entries in #12). `git status` then shows `.beads/config.yaml` as modified.
+
+**Cause.** Rig add runs `bd init`, which commits its files to whatever branch the rig has checked out. `gc` then appends `dolt:` / `shared-server: false` to `.beads/config.yaml`, a file that commit has just started tracking.
+
+**Fix.** Keep the commit. Reverting it deletes the bead store's config and metadata from the rig. Hide the later edit from git instead:
+
+```bash
+git -C <rig> update-index --skip-worktree .beads/config.yaml
+```
+
+If you measure agent output by commits on the rig's branch, start counting after this commit and any setup commits of your own, not from the branch's base.
+
+**How I verified.** Observed. I found the commit in the rig branch's log after rig add, and before it `.beads/config.yaml` wasn't tracked on my base branch. With the flag set, `git status` showed only my own `.gitignore` edit.
+
+## 14. Context-bundle paths resolve from the bundle's directory, not the rig root
+
+**Symptom.** The pack's context-bundle validator (`assets/scripts/validate_context_bundle.py`) exits 1 on `<rig>/<dir>/context.yaml` when its items are written from the rig root, like `path: <dir>/spec.md`. Each item resolves to `<rig>/<dir>/<dir>/spec.md`.
+
+**Cause.** The validator resolves a relative `path` against the bundle file's own directory (`resolve_item_path` in the pinned pack). `--allow-root` only bounds where paths may resolve to. It doesn't change the base.
+
+**Fix.** For files next to the bundle, use bare filenames (`path: spec.md`). Write anything else relative to the bundle's directory, or as an absolute path. Run the validator before you sling:
+
+```bash
+python3 <pack>/assets/scripts/validate_context_bundle.py <rig>/<dir>/context.yaml --allow-root <rig>
+```
+
+**How I verified.** Observed. Root-relative paths failed with every prefix doubled. With bare filenames the validator returned `{"items": 3, "ok": true}`. I then read the resolution rule in the pinned pack.
+
+## 15. `gc rig add --include` of the roles pack leaves formulas with no agents
+
+**Symptom.** You add the rig with `--include` pointing at the `gascity/roles` pack. Slinging a formula such as `build-basic` then fails "agent not found", because the rig's agents are named `roles.*`.
+
+**Cause.** The `gascity` template already imports `gascity/roles` for every rig under the name `gc` (`[defaults.rig.imports.gc]`). `--include` writes `[rigs.imports.roles]`, which displaces that default instead of adding to it. Formulas route to `gc.*` roles (`build-basic` names eleven), and none of those exist on the rig. This is also why my `city.toml` seemed to import the roles pack twice.
+
+**Fix.** Add the rig with no `--include`. On a rig already added that way, deleting `[rigs.imports.roles]` isn't enough: the default applies only at rig add, so the rig is left with no role agents at all. Add a `[rigs.imports.gc]` block with the same source and pin as `[defaults.rig.imports.gc]`, then run `gc import install`. `gc config explain` should then list `<rig>/gc.*` roles.
+
+**How I verified.** Observed. The failure came first. After the repair, `gc config explain` listed twelve `<rig>/gc.*` roles and the sling dry run resolved (see #16). A dry run proves only the formula's entry point. Its handoffs to the other `gc.*` roles first run on a real bead, and I haven't watched that yet.
+
+## 16. The sling target needs its rig prefix, and `--dry-run` hides your vars
+
+**Symptom.** A sling aimed at the bare `gc.run-operator` fails "agent not found". A `gc sling --dry-run` with the right target prints the plan but none of the `--var` values you passed, so it can't confirm them.
+
+**Fix.** Write the target as `<rig>/gc.run-operator`. Check each `--var` name against the formula's declared vars in `gc formula show <formula> --json`.
+
+**How I verified.** Observed. The dry run on `<rig>/gc.run-operator` named the formula, resolved onto the rig, planned `gc formula cook <formula> --attach <bead-id>` and started no session. None of my four vars appeared in its output, and all four are declared in `formula show`.
+
 ---
 
 ## Observed, not yet explained
 
 - `ready_delay_ms` resolves to `10000` from `builtin:claude` even though `city.toml` sets `0`. `gc config explain --provider claude` shows it.
 - Right after `gc init`, `gc status` reported `bead cache unavailable` and showed 2 of 4 agents as `unknown`.
-- A `gascity`-template `city.toml` imports `gascity/roles` twice, once under `[defaults.rig.imports.gc]` and once under `[rigs.imports.roles]`. `gc doctor` didn't flag it.
 
 ---
 
 ## Sources
 
-These are the private notes behind this page. "Setup log" is the experiment's setup record. "Incident review" is the write-up of the failed first launch. "Research" refers to two read-only passes over the `gc` 1.5.0 docs, source and pinned pack.
+These are the private notes behind this page. "Setup log" is the experiment's setup record. "Incident review" is the write-up of the failed first launch. "Runbook" is the step-by-step setup procedure the log follows. "Research" refers to two read-only passes over the `gc` 1.5.0 docs, source and pinned pack.
 
 | # | Gotcha | Source |
 |---|---|---|
@@ -175,4 +222,8 @@ These are the private notes behind this page. "Setup log" is the experiment's se
 | 10 | Guard hook is a shallow blocklist | Setup log §5.8 and §5.10 (hook read-back); orchestrator research §C1–C2 |
 | 11 | Local pack clone isn't what runs | Orchestrator research §0; setup log §5.6 (pin sha) |
 | 12 | `worktrees/` not gitignored | Orchestrator research §D2–D3 (code-read) |
-| — | `ready_delay_ms`, `bead cache unavailable`, duplicate roles import | Setup log §5.6, §5.7 and §5.10 |
+| 13 | `gc rig add` commits, then dirties `.beads/config.yaml` | Setup log, 2026-10-08 03:20Z and 03:26Z entries; runbook §5.4 and §5.10 |
+| 14 | Context-bundle paths resolve from the bundle's directory | Setup log, 2026-10-08 03:22Z and 03:26Z entries; runbook §5.4; pinned pack's `validate_context_bundle.py` |
+| 15 | `--include` of the roles pack displaces the default import | Setup log, 2026-10-08 03:42Z and 15:57Z entries; setup log §5.10 (duplicate import); runbook §5.10 |
+| 16 | Sling target needs its rig prefix; dry run hides vars | Setup log, 2026-10-08 15:57Z entry; runbook §5.11 and its values table |
+| — | `ready_delay_ms`, `bead cache unavailable` | Setup log §5.6 and §5.7 |

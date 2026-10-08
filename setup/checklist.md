@@ -21,9 +21,13 @@ Run this before the first `gc init` on a machine, and again before any run you p
 
 ## Before the first `gc sling`
 
+- [ ] Add the rig with no `--include`, then check that `gc config explain` lists `<rig>/gc.*` roles. (#15)
+- [ ] Find `gc`'s own "bd init" commit on the rig's branch and count agent output from after your setup commits. `.beads/config.yaml` is `--skip-worktree`, and `git status` in the rig is clean. (#13)
 - [ ] Allow time for `gc import install`. Mine took 23 minutes. (#7)
 - [ ] `gc doctor` has no failures, and you've read every warning. (#8)
 - [ ] You've decided how commits in `<rig>/worktrees/<id>` will get back to your branch. (#9)
 - [ ] `worktrees/` is in the rig's `.gitignore` or `.git/info/exclude`. (#12)
+- [ ] Any context bundle passes the pack's validator, with item paths written from the bundle's own directory. (#14)
+- [ ] The sling target is written `<rig>/gc.run-operator`, and every `--var` name matches a var declared in `gc formula show <formula> --json`. (#16)
 - [ ] Any guard hook sits in `<city-dir>/.claude/settings.json` and still reads back after `gc rig add` and `gc import install`. Its limits are written down, because it won't stop an agent determined to write. (#10)
 - [ ] Rehearse one trivial bead on a scratch rig first. Check the agent's actual command line, model and effort before you sling the real work.
