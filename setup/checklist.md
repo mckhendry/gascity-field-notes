@@ -18,6 +18,7 @@ Run this before the first `gc init` on a machine, and again before any run you p
 - [ ] `city.toml` has a `[providers.claude]` block with `option_defaults` for `model`, `effort` and `permission_mode`. (#4)
 - [ ] `gc config explain --provider claude` shows those values coming from `providers.claude`, not `builtin:claude`. (#4, #5)
 - [ ] Note which pack sha the city pinned, and read that version of the pack, not your local clone. (#11)
+- [ ] Restart the `mayor` session after the provider block is in place, and check its environment with `ps -E`. It started before your provider settings existed. (#23)
 
 ## Before the first `gc sling`
 
@@ -25,9 +26,19 @@ Run this before the first `gc init` on a machine, and again before any run you p
 - [ ] Find `gc`'s own "bd init" commit on the rig's branch and count agent output from after your setup commits. `.beads/config.yaml` is `--skip-worktree`, and `git status` in the rig is clean. (#13)
 - [ ] Allow time for `gc import install`. Mine took 23 minutes. (#7)
 - [ ] `gc doctor` has no failures, and you've read every warning. (#8)
-- [ ] You've decided how commits in `<rig>/worktrees/<id>` will get back to your branch. (#9)
-- [ ] `worktrees/` is in the rig's `.gitignore` or `.git/info/exclude`. (#12)
+- [ ] You've planned your own integration step: find the item worktree that holds every item's commits, fast-forward the branch to it, and push. Turning on `push` and `open_pr` doesn't do this. (#9, #18)
+- [ ] `/.gc/` and `/worktrees/` are in the repository's `.git/info/exclude`. (#12)
+- [ ] The pack's check scripts are in `<rig>/.gc/scripts/`, and every `python3` the controller might resolve can import PyYAML. One trivial bead's artifact control closes `pass`. (#21)
+- [ ] The goal bead says what the agents may spend without asking and who rules on questions about the bar. Otherwise the review loop iterates until it fails. (#19)
 - [ ] Any context bundle passes the pack's validator, with item paths written from the bundle's own directory. (#14)
 - [ ] The sling target is written `<rig>/gc.run-operator`, and every `--var` name matches a var declared in `gc formula show <formula> --json`. (#16)
 - [ ] Any guard hook sits in `<city-dir>/.claude/settings.json` and still reads back after `gc rig add` and `gc import install`. Its limits are written down, because it won't stop an agent determined to write. (#10)
 - [ ] Rehearse one trivial bead on a scratch rig first. Check the agent's actual command line, model and effort before you sling the real work.
+- [ ] If you'll compare plugin evals, check that the cases can run inside `claude plugin eval`'s sandbox. A case that shells out to `claude -p` can't. (#25)
+
+## During the run
+
+- [ ] Watch `gc events --follow` for `execution.step_stalled`, and `gc session peek` each stalled session. An agent may be waiting on a question nobody else will see. (#20)
+- [ ] Expect workers to claim and release workflow roots, and idle slots to wake about every 50 seconds. Both cost money and neither needs a fix from you. (#17, #22)
+- [ ] Key any stall watcher to the `gc` session, not a transcript file, and don't chase control-dispatcher restarts unless work stops. (#24)
+- [ ] Keep the machine awake, and budget for a shared usage-limit pause. Take both out of any clock you compare. (#26)

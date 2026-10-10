@@ -1,6 +1,6 @@
 # Two drivers, one spec
 
-**Status: in progress. No results yet.** This page describes the design. Results will be added when both sides reach the stopping point.
+This page describes the design. **Results are in [two-driver-results.md](two-driver-results.md):** milestone 1 graded, milestone 2 preliminary.
 
 ## The question
 
@@ -54,7 +54,7 @@ A Python package for a private video-analysis pipeline. Both sides get the same 
 |---|---|
 | Spec pinned and reviewed | Done |
 | First launch attempt | Failed during setup; reset and rerun |
-| Setup, second attempt | In progress (most checks pass; `gc doctor` has one open failure, gotcha #8) |
-| Build, side A | Not started |
-| Build, side B | Not started |
-| Results | Not yet |
+| Setup, second attempt | Done |
+| Milestone 1, both sides | Done; neither met the gate |
+| Milestone 2, both sides | Done; neither met the gate |
+| Results | [Milestone 1 graded; milestone 2 preliminary](two-driver-results.md) |

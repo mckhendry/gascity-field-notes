@@ -8,16 +8,17 @@ This is for engineers about to try Gas City with Claude Code. It assumes you've 
 
 | Path | What it covers |
 |---|---|
-| [setup/gotchas.md](setup/gotchas.md) | The setup traps I hit, each with its symptom, cause, fix and how I know |
-| [setup/checklist.md](setup/checklist.md) | A short pre-flight checklist built from those gotchas |
+| [setup/gotchas.md](setup/gotchas.md) | The traps I hit in setup and in running a build through two milestones, each with its symptom, cause, fix and how I know |
+| [setup/checklist.md](setup/checklist.md) | A short pre-flight and during-the-run checklist built from those gotchas |
 | [concepts/how-gas-city-works.md](concepts/how-gas-city-works.md) | A plain-language model of cities, rigs, beads, formulas, sling and packs, and what each agent is given to read |
-| [experiments/two-driver-comparison.md](experiments/two-driver-comparison.md) | The design of a head-to-head build, with results still to come |
+| [experiments/two-driver-comparison.md](experiments/two-driver-comparison.md) | The design of a head-to-head build: Gas City against a hand-rolled Claude Code orchestrator |
+| [experiments/two-driver-results.md](experiments/two-driver-results.md) | Its results: delivery, gate, time, cost and human inputs for milestones 1 and 2, with the caveats |
 
 Every claim says whether I saw it happen on a live city or only read it in the source. Each page carries its versions and dates. If your `gc` version differs, assume something here is stale.
 
-## Coming next
+## Where it stands
 
-A measured head-to-head is in progress. Gas City and a hand-rolled Claude Code orchestrator each build one pinned spec on their own blind branch, using one model at one effort level. Setup isn't timed, and both stop at the spec's first milestone. Results go in [experiments/two-driver-comparison.md](experiments/two-driver-comparison.md) once both sides finish.
+Gas City and a hand-rolled Claude Code orchestrator each built one pinned spec on their own blind branch, using one model at one effort level, through two milestones. Milestone 1 is graded, and milestone 2's numbers are preliminary until its grading is done. The results, with their caveats, are in [experiments/two-driver-results.md](experiments/two-driver-results.md).
 
 ## License
 

@@ -1,9 +1,9 @@
 # Setup gotchas
 
-The setup traps I hit getting Gas City ready to build a spec, and what fixed each one.
+The traps I hit getting Gas City ready to build a spec and then running that build through two milestones, with what fixed each one. Entries 1–16 are setup. Entries 17–26 came from the build itself.
 
-- **Versions:** `gc` 1.5.0 (Homebrew), Claude Code 2.1.293, macOS with launchd.
-- **Dates:** 2026-10-05 to 2026-10-08 (UTC).
+- **Versions:** `gc` 1.5.0 (Homebrew), Claude Code 2.1.293 at setup and 2.1.296 by milestone 2 (it auto-updated mid-run), macOS with launchd.
+- **Dates:** 2026-10-05 to 2026-10-10 (UTC).
 - **Pack:** the `gascity` template's pack, pinned by `gc` 1.5.0 to `sha:3b3b89f2011e06d84459aa7bea1552382f13930a`.
 
 Each entry says how I know it. **Observed** means I hit it on a live city. **Code-read** means I read it in the `gc` source or the pinned pack and haven't watched it happen. Treat code-read entries as leads to check.
@@ -115,7 +115,7 @@ This changes your global git config, not just this city's.
 
 **Fix.** Decide before you sling how results get back to your branch: a manual merge from `<rig>/worktrees/`, `push`/`open_pr`, or something else. `--merge direct|mr|local` only writes metadata, and nothing in the pack reads it (code-read).
 
-**How I verified.** I read `--detach HEAD` in the pinned pack inside my live city. I haven't watched where a build's commits land yet; the experiment records that.
+**How I verified.** I read `--detach HEAD` in the pinned pack inside my live city, then watched it happen in two real runs: every item's commits stayed in detached worktrees. #18 covers what that does to delivery.
 
 ## 10. A PreToolUse guard hook is only a shallow blocklist
 
@@ -137,15 +137,15 @@ This changes your global git config, not just this city's.
 
 **How I verified.** Observed. My live city's pin matched the sha above. The diff size is code-read.
 
-## 12. The rig's `worktrees/` directory isn't gitignored
+## 12. Neither `.gc/` nor the rig's `worktrees/` is ignored
 
-**Symptom.** `git status` in the rig shows a `worktrees/` directory after a build.
+**Symptom.** `git status` in the rig shows `?? .gc/` once agents have run there, and `?? worktrees/` after a build. Any agent step that runs a broad `git add` would commit them, and with `push` on, publish could push them.
 
-**Cause.** `gc rig add` adds `.beads/*` (and `!.beads/identity.toml`) to the rig's `.gitignore`. The per-item worktrees go under `<rig>/worktrees/`, which nothing ignores.
+**Cause.** `gc rig add` adds `.beads/*` (and `!.beads/identity.toml`) to the rig's `.gitignore`. Nothing ignores `.gc/` in the rig or the per-item worktrees under `<rig>/worktrees/`.
 
-**Fix.** Add `worktrees/` to the rig's `.gitignore` or `.git/info/exclude` before you sling.
+**Fix.** Before you sling, add `/.gc/` and `/worktrees/` to the repository's `.git/info/exclude`. That keeps them out of git without a tracked commit on the branch you're measuring. If the rig is itself a git worktree, the exclude file lives in the main checkout's `.git/` and applies to every worktree of that repo.
 
-**How I verified.** Code-read only.
+**How I verified.** Observed. A one-bead smoke test left `?? .gc/` in the rig, and the milestone-1 build left `?? worktrees/`. After both entries went into `.git/info/exclude`, `.gc/` no longer showed in `git status`, and `git check-ignore` confirmed `worktrees/`.
 
 ## 13. `gc rig add` commits to your rig's branch, then leaves it dirty
 
@@ -197,6 +197,119 @@ python3 <pack>/assets/scripts/validate_context_bundle.py <rig>/<dir>/context.yam
 
 ---
 
+## 17. Workflow roots get routed to implementation workers
+
+**Symptom.** During the implementation drain, implementation workers claim a bead that turns out to be a do-work workflow root (`gc.kind=workflow`), not a work item. Each one releases it, and about a minute later another worker claims it. Some workers stop and ask a human instead: release it and drain, or close it as failed? In milestone 2, three workers stopped like this, and `gc` flagged each step as stalled.
+
+**Cause.** An upstream bug, open as [gastownhall/gascity#6461](https://github.com/gastownhall/gascity/issues/6461). It was reported against 1.4.1, and the code is unchanged in 1.5.0 (code-read at tag `v1.5.0`):
+
+- The drain decorates each item's do-work recipe with the drain's execution route, and `DecorateGraphWorkflowRecipeWithDefaultBinding` stamps `gc.routed_to` on the root unconditionally (`internal/graphroute/graphroute.go:645-652`). With the pack's default `implementation_target`, that's `<rig>/gc.implementation-worker`.
+- The compiler links the root to `workflow-finalize` with a `tracks` edge, not `blocks`, and its comment says the root is a latch that is "never routed or dispatched" (`internal/formula/compile.go:680-697`). So once the previous drain item closes, the root is ready.
+- The worker's work query, `bd ready --metadata-field gc.routed_to=<target> --unassigned …`, doesn't filter on `gc.kind=workflow` (`internal/config/workquery.go:226-228`). The claim check's first branch accepts any bead whose `gc.routed_to` matches the worker (`cmd/gc/cmd_hook_claim.go:3103-3125`).
+- The pack's worker prompt says workflow and scope beads are latches it "should not receive", but gives no instruction for what to do with one. So some workers ask.
+
+This came from the default template and pack. A hand repair of my rig import (#15) restored the default binding byte for byte and doesn't appear anywhere in the chain.
+
+**Fix or workaround.** None in 1.5.0. The roots end up closed by workflow cleanup, so the run keeps going, but the churn burns seats (see #22), and a worker that asks a human stalls until someone answers or its lease runs out (see #20). My untested guess: telling workers outright to release a latch bead and drain would turn the questions into silent releases.
+
+**How I verified.** Observed, then code-read. All 15 do-work roots under the milestone-2 drain carried `gc.routed_to=<rig>/gc.implementation-worker` and `gc.kind=workflow`. Each named root's assignee changed to a new worker session about once a minute, across roughly ten sessions per root. The other twelve roots went through the same cycle, but their workers released them silently. So the count of three prompts reflects how each worker judged the bead, not how many roots were affected. A read-only trace then followed the chain through the `v1.5.0` source and the pinned pack.
+
+## 18. Finalize leaves the work detached, and publish can't deliver it
+
+**Symptom.** The build finishes and finalize writes `factory-run.md`, but the rig's branch hasn't moved. Turning on `push` and `open_pr` doesn't change that. In my milestone-1 run (`push` off), all 11 build commits stayed on a detached HEAD in one item worktree. Before milestone 2, a publish run with `push=true` and `open_pr=true` closed `pass` and moved nothing. In milestone 2 (`push` and `open_pr` on from the start), publish closed `fail` with "Nothing approved to push or PR", and the branch on the remote was where it started.
+
+**Cause.** Three things stack:
+
+- Each item gets a detached worktree based on the rig's HEAD at that moment, not on its dependencies' commits (#9). Agents pull in dependencies by hand. In milestone 1 they cherry-picked, so the same change ended up under two SHAs. In milestone 2 they merged or stacked on the original SHAs. The last item's worktree ended up holding the integrated line both times.
+- Finalize doesn't merge that line onto the branch. It hands the merge to a human: the smoke test's report named `git merge --ff-only <sha>` as the next action, and milestone 2's report listed "operator integration" of the final commit.
+- Publish pushes the branch's current head. It can't push commits that sit on a detached HEAD in an item worktree. It also skips when the review never approved: in milestone 2 the review loop failed out (#19), and the artifact check on finalize failed on PyYAML (#21), so publish had nothing approved to send.
+
+**Fix.** Plan your own integration step. Find the item worktree whose HEAD holds every item's commits, check that it does, then fast-forward the branch to it and push. If you run a guard hook, check that it allows publish's push. Mine blocked the lease-checked push on the one run where publish tried.
+
+**How I verified.** Observed across a smoke test and both milestones. The one fast-forward I did by hand, from the setup commits to the milestone-1 tip, worked cleanly and touched no `.gc/`, `worktrees/` or `.beads/` paths.
+
+## 19. The review loop can't converge on decisions it isn't allowed to make
+
+**Symptom.** In autonomous mode, the review stage keeps iterating with no new commits. Each pass ends in "iterate pending operator items" and takes about five minutes, until the loop's check gives up and closes `fail`. Finalize then reports `blocked`.
+
+**Cause.** The review routes two kinds of item to a human: spending approvals (in milestone 2, about $1 to resume three ingests that timed out, plus a paid eval rerun on one input) and decisions about the bar (fix the test harness or pick a different bar, and whether some evidence is enough). The pack gives the loop no spend budget and no agent with authority to rule on either, and `interaction_mode=autonomous` doesn't change that. So the loop re-reviews the same open items. In milestone 2 it ran six iterations, four of them no-ops, before its control closed `fail`. That's the review loop check's `max_attempts` of 6, not the formula's `max_iterations` of 10. Milestone 1 failed the opposite way: the fixer left "a gate decision and a rerun" to me, the review approved on its third pass while the gate was still failing, and a prompt change landed after the gate ran without the gate running again.
+
+**Workaround.** Untested, but: put a spend ceiling and a decision owner in the goal bead before you sling. Say what the agents may spend without asking and who, or which agent, rules on questions about the bar. In my comparison, the other driver had an advisor agent that ruled on this class of question during the run, and its review didn't stall this way.
+
+**How I verified.** Observed in both milestones, from the review synthesis and fix-pass close reasons and from the finalize report.
+
+## 20. Agents in autonomous mode stop to ask a human, and nothing tells you
+
+**Symptom.** A step stalls. `gc session peek` shows the agent sitting at an interactive question (Claude Code's multiple-choice prompt) or a free-text question addressed to a person. Nobody is at that terminal, and `gc` sends no notification.
+
+**Cause.** `interaction_mode=autonomous` doesn't stop an agent from asking. It happened four times across two milestones. Once, a run operator on its last check attempt asked how to handle a missing dependency (#21). The other three were workers holding misrouted roots (#17). One of the offered answers was to install packages into the system Pythons, a machine change outside anything I had allowed. The only way the question reaches anyone is if someone happens to be watching that session.
+
+**Workaround.** Watch `gc events --follow` for `execution.step_stalled`, then `gc session peek <session>` the stalled step's session. To answer, `gc session attach <session>`. Read every option before you pick one. One of mine offered to install packages into the system Pythons. `gc` flags a stall by step age, so expect the flag a few minutes after the question appears.
+
+**How I verified.** Observed. The milestone-1 question blocked the run for 52 minutes, until I attached and answered it. The three in milestone 2 got no answer. Their beads closed `fail` on their own, within about 5 to 20 minutes for two of them and later for the third.
+
+## 21. Artifact checks fail on a PyYAML the controller can't see
+
+**Symptom.** Every `build-artifact-valid.sh` control closes `gc.outcome: fail` after three attempts, each with `error: PyYAML is required to parse build artifacts`. Meanwhile the agent's own step closes `pass`, and it says the artifact is valid when it runs the validator itself. Failed checks don't block the workflow, so each stage just pays for about two extra agent attempts. In milestone 2 every retry also left an extra summary commit in the item worktree.
+
+**Cause.** A fresh 1.5.0 city has no check scripts at all ([gastownhall/gascity#4239](https://github.com/gastownhall/gascity/issues/4239)). Without them, steps whose work passed close `control_quarantined`. I copied the pinned pack's scripts into `<rig>/.gc/scripts/` before the build. The scripts need PyYAML, and the controller's check doesn't find it. In my shell, `python3` resolved to a python.org install that had PyYAML. `/usr/local/bin/python3` and `/usr/bin/python3` didn't have it. The supervisor's PATH looked the same as my shell's, so the check most likely runs with a narrower environment. That last part is my inference. An open issue upstream, gascity-packs#340, reports the same symptom: PyYAML invisible to the gate, so the failure looks like a bad artifact.
+
+**Fix.** Make PyYAML importable by every `python3` the controller might resolve. For me that means `/usr/local/bin/python3` and `/usr/bin/python3`, not just the one first on your PATH. Then run a single trivial bead and check that its artifact control closes `pass`. I didn't apply this during either milestone, so I haven't confirmed it.
+
+**How I verified.** Observed in both milestones: every artifact control failed this way. Which interpreters had PyYAML I checked by hand. Where the check actually runs is inferred.
+
+## 22. Idle worker slots wake and drain about every 50 seconds
+
+**Symptom.** While one long item runs alone, implementation-worker sessions keep starting, finding nothing, acknowledging a drain and stopping, about every 50 seconds. Each wake is a fresh Claude session on your configured model. `gc costs` shows many sessions with one to three invocations.
+
+**Cause.** The pool keeps scaling up on routed demand that no worker can actually use. The trace behind #17 ties at least part of this churn to the misrouted root: each worker claims it, releases it, and the pool starts another.
+
+**Fix.** None in 1.5.0. Budget for it as real spend.
+
+**How I verified.** Observed and measured. Over about 12 minutes of milestone 1, with one item running, worker slots woke and drained about 16 times. Counted from the transcripts at list price, 165 agent sessions that woke, found no work and stopped (449 calls, no writes, at most three tool calls each) cost $34.95 of Gas City's $144.40 for milestone 1. That count is conservative: sessions that made more than three tool calls before draining are counted as working. On a subscription, the same churn eats into the shared usage limit (#26).
+
+## 23. The always-on mayor keeps the settings it started with
+
+**Symptom.** After you configure the provider, new agents launch with your model, effort and environment. The `mayor` session doesn't. Mine ran `--dangerously-skip-permissions` on my real Claude profile, without the separate profile and isolation variables every other agent got.
+
+**Cause.** The mayor starts at `gc init`, before you've written the `[providers.claude]` block (#4), and keeps running. Nothing restarted it when the provider config changed.
+
+**Fix.** After the provider is configured, restart the mayor session. Then read its environment back with `ps -E` and check for your profile directory and isolation variables.
+
+**How I verified.** Observed. A smoke test caught it. After a restart, `ps -E` showed the mayor on the separate profile.
+
+## 24. The control dispatcher restarts itself, and workers change Claude session ids
+
+**Symptom.** `gc session list` shows a new control-dispatcher session partway through a run. Separately, a stall watcher that follows a worker's transcript file fires while the worker is fine.
+
+**Cause.** In milestone 1, the control dispatcher restarted twice, each time 15 to 40 seconds after a `session.work_query_failed` event (`bd --readonly --sandbox ready …` exited 1). Nobody intervened, and the work carried on. A worker can also move to a new Claude session id while keeping the same `gc` session and bead claim, so its transcript moves to a new file.
+
+**Workaround.** Count dispatcher restarts, but don't chase them unless work stops. Key any stall watcher to the `gc` session and look up its current transcript on every check, rather than watching one file. `gc`'s own `execution.step_stalled` fires on step age, not transcript silence, so the two measures disagree. Pick one before the run.
+
+**How I verified.** Observed. Both dispatcher restarts followed a failed work query. In milestone 2 my watcher on the old transcript raised a false stall. The worker was waiting on its own background batch under a new session id.
+
+## 25. `claude plugin eval` can't run a package that shells out to `claude -p` (not Gas City-specific)
+
+**Symptom.** A plugin's eval cases that drive a CLI calling `claude -p` all fail. The milestone-2 build's 8 cases scored 0 of 8.
+
+**Cause.** `claude plugin eval` runs each case in an OS sandbox. Inside it, the home directory is unreadable, writes are confined to the workspace, and the case couldn't reach the graph database through the sandbox's proxy. The agent found no supported setting to widen access. Either driver could hit this. It comes from Claude Code's sandbox.
+
+**Fix.** None found. Design the eval cases around the sandbox, or gate that layer some other way. The other driver's 8 eval cases for the same spec passed, so how the cases are written matters. I haven't compared the two suites.
+
+**How I verified.** Observed on Claude Code 2.1.296: `casesPassed 0`, exit 1. The sandbox limits come from the building agent's report in its transcript, which I didn't reproduce.
+
+## 26. A shared subscription usage limit pauses every agent at once (not Gas City-specific)
+
+**Symptom.** Every agent stops partway through a step. A session shows "You've hit your session limit · resets <time>", then later "Usage limit reset · continuing automatically", and the work resumes by itself.
+
+**Cause.** Every Gas City agent ran on the same subscription as the session driving it. Parallel workers plus idle churn (#22) used up the limit. This applies to any setup that puts many agents on one subscription.
+
+**Fix.** Nothing needs restarting. Budget for the wait, and take it out of any wall clock you're comparing. Before you call a gap a stall, check whether the machine slept (`pmset -g log` on macOS). Lid-closed sleep accounted for part of both long gaps in my milestone-1 run.
+
+**How I verified.** Observed. The limit message appeared in a run-operator session, and the agents resumed after the reset without a restart. It took 88 minutes off milestone 1's clock. It hit only the Gas City side because the other driver had already stopped.
+
+---
+
 ## Observed, not yet explained
 
 - `ready_delay_ms` resolves to `10000` from `builtin:claude` even though `city.toml` sets `0`. `gc config explain --provider claude` shows it.
@@ -206,7 +319,7 @@ python3 <pack>/assets/scripts/validate_context_bundle.py <rig>/<dir>/context.yam
 
 ## Sources
 
-These are the private notes behind this page. "Setup log" is the experiment's setup record. "Incident review" is the write-up of the failed first launch. "Runbook" is the step-by-step setup procedure the log follows. "Research" refers to two read-only passes over the `gc` 1.5.0 docs, source and pinned pack.
+These are the private notes behind this page. "Setup log" is the experiment's setup record. "Incident review" is the write-up of the failed first launch. "Runbook" is the step-by-step setup procedure the log follows. "Research" refers to two read-only passes over the `gc` 1.5.0 docs, source and pinned pack. "Run log" is the Gas City driver's minute-by-minute record of the build, with milestone 1 on 2026-10-08 and milestone 2 on 2026-10-09. "Comparison record" is the experiment's shared log of both sides. "Misroute trace" (2026-10-10) and "check-scripts research" (2026-10-08) are read-only investigations of the `gc` 1.5.0 source and pinned pack. "Milestone-1 write-up" is the measured comparison behind [two-driver-results.md](../experiments/two-driver-results.md).
 
 | # | Gotcha | Source |
 |---|---|---|
@@ -218,12 +331,22 @@ These are the private notes behind this page. "Setup log" is the experiment's se
 | 6 | Plist snapshots PATH; `gc` adds `~/bin` | Setup log §5.6; best-practices research §G.4; orchestrator research §G2; driver-window PATH check, 2026-10-05 |
 | 7 | `gc import install` took 23 minutes | Setup log §5.10 |
 | 8 | `gc doctor` fails `beads-role` | Setup log §5.10; best-practices research §G.7 |
-| 9 | Detached worktrees from `--detach HEAD` | Setup log §5.6; orchestrator research §C3–C5 |
+| 9 | Detached worktrees from `--detach HEAD` | Setup log §5.6; orchestrator research §C3–C5; run log, milestones 1 and 2 (item landings tables) |
 | 10 | Guard hook is a shallow blocklist | Setup log §5.8 and §5.10 (hook read-back); orchestrator research §C1–C2 |
 | 11 | Local pack clone isn't what runs | Orchestrator research §0; setup log §5.6 (pin sha) |
-| 12 | `worktrees/` not gitignored | Orchestrator research §D2–D3 (code-read) |
+| 12 | `.gc/` and `worktrees/` not ignored | Orchestrator research §D2–D3 (code-read); comparison record, smoke B (2026-10-08 ~17:02Z) and the fix that followed; run log, milestone 1 drain close (13:30 MST); comparison record, milestone-2 rulings (~18:30Z, `check-ignore`) |
 | 13 | `gc rig add` commits, then dirties `.beads/config.yaml` | Setup log, 2026-10-08 03:20Z and 03:26Z entries; runbook §5.4 and §5.10 |
 | 14 | Context-bundle paths resolve from the bundle's directory | Setup log, 2026-10-08 03:22Z and 03:26Z entries; runbook §5.4; pinned pack's `validate_context_bundle.py` |
 | 15 | `--include` of the roles pack displaces the default import | Setup log, 2026-10-08 03:42Z and 15:57Z entries; setup log §5.10 (duplicate import); runbook §5.10 |
 | 16 | Sling target needs its rig prefix; dry run hides vars | Setup log, 2026-10-08 15:57Z entry; runbook §5.11 and its values table |
+| 17 | Workflow roots routed to implementation workers | Misroute trace, §1–§4 (file:line at `v1.5.0`, upstream #6461); run log, milestone 2 (12:53, 13:40 and 14:13 MST stalls) |
+| 18 | Finalize leaves work detached; publish can't deliver | Comparison record, finalize smoke (17:32Z) and milestone-2 rulings (~18:18Z prep publish, fast-forward); run log, milestone 1 item landings and milestone 2 publish close (17:58 MST); milestone-1 write-up, Delivery |
+| 19 | Review loop can't converge on decisions it can't make | Run log, milestone 1 review (13:44–13:57 MST) and milestone 2 review iterations 1–6 (17:19–17:51 MST); comparison record, milestone-2 rulings (what Gas City routed to a human; delegation gap) |
+| 20 | Agents ask a human in autonomous mode | Run log, milestone 1 (~15:58 MST prompt, answered ~17:09) and milestone 2 (12:53, 13:40, 14:13 MST); comparison record (no notification); milestone-1 write-up, attended time (52-minute block) |
+| 21 | Artifact checks fail on PyYAML | Run log, milestone 1 (11:11 MST finding; interpreter check) and milestone 2 item landings (summary commit per retry); check-scripts research, bottom line and §(b) (#4239, packs#340) |
+| 22 | Idle worker slots wake every ~50 s | Run log, milestone 1 (12:03–12:16 MST); milestone-1 write-up, Cost (idle drain $34.95, 165 sessions, 449 calls); misroute trace §2 |
+| 23 | Mayor keeps the settings it started with | Comparison record, smoke B failure (2) and the fix that followed (`ps -E`) |
+| 24 | Dispatcher restarts; worker session ids change | Run log, milestone 1 (11:28 and 11:36 MST restarts) and milestone 2 (14:00–14:15 MST session id change, false stall) |
+| 25 | `claude plugin eval` sandbox stops the CLI | Run log, milestone 2 (14:00 MST worker report; gate checkpoint, layer 3); comparison record, milestone 2 (other driver's evals 8/8) |
+| 26 | Shared usage limit pauses every agent | Run log, milestone 1 (stall #1, 14:06–15:34 MST; Mac sleep from `pmset`); comparison record (88-minute exclusion) |
 | — | `ready_delay_ms`, `bead cache unavailable` | Setup log §5.6 and §5.7 |
