@@ -2,7 +2,7 @@
 
 After two milestones went wrong in the ways [gotchas.md](gotchas.md) records, I stopped guessing and checked each problem against Gas City's own documentation. Four read-only passes covered the published docs, the docs source at the release tag, `gc <cmd> --help`, the pinned `gascity` pack, and, where the docs were silent, the `gc` source. This page is what they found: for each problem, what the docs actually say, whether configuration can fix it, and where you need code.
 
-- **Versions:** `gc` 1.5.0 (tag `v1.5.0`), `bd` 1.3.1. The `gascity` pack pinned by 1.5.0 is `sha:3b3b89f2…`, called **the pin** below. Pack main is `33da48c` (2026-10-04). Upstream `gc` main is `8fd6aa25c` (2026-10-10).
+- **Versions:** `gc` 1.5.0 (tag `v1.5.0`), `bd` 1.3.1. The `gascity` pack pinned by 1.5.0 is `sha:3b3b89f2…`, called **the pin** below. Pack main is `520e95cb` (2026-10-08). Upstream `gc` main is `8fd6aa25c` (2026-10-10).
 - **Date:** 2026-10-10.
 - **Tags:**
   - **Documented**: the gc docs, CLI help, or the pack's own README/REQUIREMENTS say it.
