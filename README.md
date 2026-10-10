@@ -9,6 +9,7 @@ This is for engineers about to try Gas City with Claude Code. It assumes you've 
 | Path | What it covers |
 |---|---|
 | [setup/gotchas.md](setup/gotchas.md) | The traps I hit in setup and in running a build through two milestones, each with its symptom, cause, fix and how I know |
+| [setup/what-the-docs-say.md](setup/what-the-docs-say.md) | Each problem checked against Gas City's own docs: what they say, what configuration fixes, and what needs code |
 | [setup/checklist.md](setup/checklist.md) | A short pre-flight and during-the-run checklist built from those gotchas |
 | [concepts/how-gas-city-works.md](concepts/how-gas-city-works.md) | A plain-language model of cities, rigs, beads, formulas, sling and packs, and what each agent is given to read |
 | [experiments/two-driver-comparison.md](experiments/two-driver-comparison.md) | The design of a head-to-head build: Gas City against a hand-rolled Claude Code orchestrator |
