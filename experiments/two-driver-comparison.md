@@ -1,6 +1,6 @@
 # Two drivers, one spec
 
-This page describes the design. **Results are in [two-driver-results.md](two-driver-results.md):** milestone 1 graded, milestone 2 preliminary.
+This page describes the design. **Results are in [two-driver-results.md](two-driver-results.md):** milestone 1 graded, milestone 2 measured but not graded.
 
 ## The question
 
@@ -57,4 +57,4 @@ A Python package for a private video-analysis pipeline. Both sides get the same 
 | Setup, second attempt | Done |
 | Milestone 1, both sides | Done; neither met the gate |
 | Milestone 2, both sides | Done; neither met the gate |
-| Results | [Milestone 1 graded; milestone 2 preliminary](two-driver-results.md) |
+| Results | [Milestone 1 graded; milestone 2 measured, not graded](two-driver-results.md) |

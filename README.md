@@ -19,7 +19,7 @@ Every claim says whether I saw it happen on a live city or only read it in the s
 
 ## Where it stands
 
-Gas City and a hand-rolled Claude Code orchestrator each built one pinned spec on their own blind branch, using one model at one effort level, through two milestones. Milestone 1 is graded, and milestone 2's numbers are preliminary until its grading is done. The results, with their caveats, are in [experiments/two-driver-results.md](experiments/two-driver-results.md).
+Gas City and a hand-rolled Claude Code orchestrator each built one pinned spec on their own blind branch, using one model at one effort level, through two milestones. Milestone 1 is graded. Milestone 2 has checked time, cost and human-input numbers but no quality grade or reliability measurement. The results, with their caveats, are in [experiments/two-driver-results.md](experiments/two-driver-results.md).
 
 ## License
 
