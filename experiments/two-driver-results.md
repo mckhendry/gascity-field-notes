@@ -101,7 +101,7 @@ Times are MST on 2026-10-09.
 | Start to stop | 11:26:56 AM to 5:58 PM | 11:26:54 AM to about 1:43 PM |
 | Wall clock | **392.5 min** (6 h 32 m), of which 32.5 min falls past the 6 h cap, inside the one-hour extension I gave it (typed at 4:42 PM; cap moved to 6:27 PM) | **136.6 min** (2 h 17 m) |
 | Usage-limit wait | None | None |
-| Blocked-question wait | None. No agent waited on an answer; both questions closed `fail` unanswered | None |
+| Blocked-question wait | None. No agent waited on an answer; all three questions closed `fail` unanswered | None |
 | Milestone 1, for reference | 386.3 min | 115.2 min |
 
 These replace the approximate figures this page gave earlier (about 6 h 31 m and 2 h 16 m), which came from the comparison record rather than the script-computed measures.
@@ -133,7 +133,7 @@ The dropped lines are Gas City's observer, $18.08, and the orchestrator's own se
 |---|---|---|
 | My typed turns during the run | 3: the sling command that started the run, the one-hour cap extension, and a command to stop a process | 1: the go message |
 | My typed turns before the clock | 1: the go paste | 0 |
-| Agents that stopped to ask a human | 2, in plain text rather than through the question tool. Both closed `fail` unanswered (#20) | 0. Its subagents can't ask |
+| Agents that stopped to ask a human | 3, in plain text rather than through the question tool. All three closed `fail` unanswered (#20) | 0. Its subagents can't ask |
 | Items routed to a human for a ruling | Gas City's run report routed these to me (#19): approve a paid resume of 3 ingests that hit Qdrant timeouts (about $1); approve a paid eval rerun on one input; fix the plugin-eval harness or pick a different bar; decide whether one piece of evidence was enough for an acceptance criterion; decide what to do if the per-input regression repeats; and integrate the final commit, the human merge step built into finalize. None was answered, so finalize blocked | Ruled on during the run by its advisor agent |
 
 That's a delegation gap. Gas City's escalations reached me only through the exercise's observer and the comparison's own orchestrator session (separate from the orchestrator side's), which recommended not answering them, for measurement purity. Gas City itself sent no notification. The orchestrator has an advisor agent empowered to rule on this kind of question during the run. Gas City's pack has no advisor and no spend budget.
