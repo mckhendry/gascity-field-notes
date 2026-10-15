@@ -1,6 +1,6 @@
 # Two drivers, one spec
 
-This page describes the design. **Results are in [two-driver-results.md](two-driver-results.md):** milestone 1 graded, milestone 2 measured but not graded.
+This page describes the design. **Results are in [two-driver-results.md](two-driver-results.md):** milestone 1 graded, milestone 2 measured, a reconfigured Gas City run, and a reliability pass over every milestone-2 build.
 
 ## The question
 
@@ -57,4 +57,6 @@ A Python package for a private video-analysis pipeline. Both sides get the same 
 | Setup, second attempt | Done |
 | Milestone 1, both sides | Done; neither met the gate |
 | Milestone 2, both sides | Done; neither met the gate |
-| Results | [Milestone 1 graded; milestone 2 measured, not graded](two-driver-results.md) |
+| Reconfigured Gas City run, milestones 1 and 2, plus a recovery and a third gate attempt | Done; no build met the gate |
+| Reliability pass | Done, one gate round per build |
+| Results | [Final; Gas City dropped for this product on 2026-10-15](two-driver-results.md) |
