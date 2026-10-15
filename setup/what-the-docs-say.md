@@ -3,7 +3,7 @@
 After two milestones went wrong in the ways [gotchas.md](gotchas.md) records, I stopped guessing and checked each problem against Gas City's own documentation. Four read-only passes covered the published docs, the docs source at the release tag, `gc <cmd> --help`, the pinned `gascity` pack, and, where the docs were silent, the `gc` source. This page is what they found: for each problem, what the docs actually say, whether configuration can fix it, and where you need code.
 
 - **Versions:** `gc` 1.5.0 (tag `v1.5.0`), `bd` 1.3.1. The `gascity` pack pinned by 1.5.0 is `sha:3b3b89f2…`, called **the pin** below. Pack main is `520e95cb` (2026-10-08). Upstream `gc` main is `8fd6aa25c` (2026-10-10).
-- **Date:** 2026-10-10.
+- **Date:** 2026-10-10. Run C additions 2026-10-15.
 - **Tags:**
   - **Documented**: the gc docs, CLI help, or the pack's own README/REQUIREMENTS say it.
   - **Code-read**: only the source or a pack prompt shows it.
@@ -11,7 +11,9 @@ After two milestones went wrong in the ways [gotchas.md](gotchas.md) records, I 
   - **Undocumented**: nothing authoritative says anything.
   - **Observed**: I also saw it happen on a live city.
 
-Nobody ran a state-changing `gc` command for this page. Treat every Code-read item as a lead to verify on your own city.
+Nobody ran a state-changing `gc` command for the original passes. Treat every Code-read item as a lead to verify on your own city.
+
+I then ran a reconfigured build that applied these fixes ([results](../experiments/two-driver-results.md#run-c-gas-city-reconfigured)). Lines marked **Run C** say what that live run confirmed or disproved; each is Observed unless it says otherwise.
 
 ---
 
@@ -28,7 +30,7 @@ Nobody ran a state-changing `gc` command for this page. Treat every Code-read it
 | Work never reaches the branch (9, 18) | Config, but effectively a pack fork | Override worktree prep, add an integration step, push the recorded commit. Or use the gastown pack's refinery path |
 | Agents stop to ask a human (20) | Config, partly | `interaction_mode=headless`, plus shadowed stage prompts, plus a harness-level block on asking |
 | No one is told about escalations (20) | Config | An order on `execution.step_stalled`, plus an escalate-label pattern |
-| Workflow roots routed to workers (17) | **Code** (upstream #6461, #6932) | An interim order that strips the route from expanded roots |
+| Workflow roots routed to workers (17, 27) | **Code** (upstream #6461, #6932) | An interim order that strips the route from expanded roots. Run C: it limits the damage but doesn't stop the claim |
 | Idle wake every ~50 s (22) | **Code**, same root cause | Cap pools and lower effort to shrink the blast radius |
 | Unbounded pools, effort `max` (4) | Config | `[[rigs.patches]]` with `max_active_sessions` and `option_defaults` |
 | Per-run spend cap | **Code**: none exists | A usage-sink script that suspends at a threshold |
@@ -39,7 +41,10 @@ Nobody ran a state-changing `gc` command for this page. Treat every Code-read it
 | PyYAML invisible to checks (21) | Config (host) | Install PyYAML into the check interpreter's main site-packages |
 | A failed check still releases its dependents | **Code** (open PR #7174) | Fix the false failures instead |
 | Guard hook is only a blocklist (10) | Config | A sandboxing runtime backend, or a tighter permission mode plus deny rules |
-| Mac sleep pauses everything | Config (host) | `caffeinate` or `pmset` |
+| Mac sleep pauses everything (29) | Config (host) | `caffeinate` or `pmset`. Run C: plugging in isn't enough |
+| The execution backstop kills active workers (28) | **Code** (upstream #6748) | Shadow every step prompt: never end a turn while a background job runs |
+| The final report collides with an item's commit at integrate (30) | Config | Clear the artifact root in the rig checkout before each run |
+| A failed step can't be retried alone (31) | **Code**: no retry command found | Reopen the step's bead |
 
 ---
 
@@ -104,6 +109,8 @@ This is why my Gas City runs delivered nothing (gotchas 9 and 18).
 
 No `gc` code is needed, but it's a fork in all but name.
 
+**Run C:** these three overrides delivered. At milestone 2, integrate merged 15 item branches and publish pushed the result and opened a draft PR, with no hand fold. Getting there took three smoke tests, and integrate still failed twice for other reasons: an agent rewrote history below the target's tip (gotcha 33), and an untracked final report sat at a path an item committed (gotcha 30).
+
 **From scratch:** skip `build-basic`'s drain for delivery and use the gastown polecat and refinery path. You lose `build-basic`'s plan, review and finalize scaffolding, or rebuild it as plain slung beads.
 
 ## Autonomy, escalation and an advisor
@@ -115,10 +122,12 @@ No `gc` code is needed, but it's a fork in all but name.
 - **The pack doesn't honor its own rule** (Contradicted). Its requirements say every gate must honor the mode, but in `build-basic` only the requirements prompt reads it. Review, implement, do-work and finalize prompts never see it.
 - **Nothing in `gc` stops a Claude session from asking a question** (Code-read). Human escalation exists only for maintenance scripts. It goes to a `human` mailbox that wakes nobody (Documented). No Gas Town-style Overseer inbox ships.
 - **Notification is buildable** (Documented: orders):
-  - An order triggered by the `execution.step_stalled` event can run a notify script. That event exists in code but isn't in the docs' event list, and it fires about 11 minutes into a stall.
+  - An order triggered by the `execution.step_stalled` event can run a notify script. That event exists in code but isn't in the docs' event list. The code-read put it about 11 minutes into a stall. **Run C corrected that:** on a claimed-and-idle worker it fired 3 to 5 minutes after the claim, and my notify order's mail landed about 30 seconds later.
   - The `oversight-rig` pack shows an agent-raised version: the agent labels a bead `severity:escalate`, and a condition order delivers it.
 - **An advisor agent alone does nothing** (Documented by absence). Agents coordinate only through beads and mail, and nothing lets one agent ask another and wait. An advisor that rules on review questions works only as a new graph step routed to it, inside an overridden review formula. Check that formula is on the pack's stable override list first.
 - **Pre-authorizing paid reruns** belongs in the requirements, the context bundle, or shadowed review prompts. `gc` has no approval primitive. For a real human gate, use `[steps.gate]`/`waits_for`, which makes the wait explicit instead of an agent stalling in its terminal.
+
+**Run C:** with all three steps below in place, no agent asked a human in four runs. An advisor step routed inside an overridden review ruled five open decisions in about two and a half minutes at milestone 1, and none reached a human during a run.
 
 **Fix by configuration:**
 1. Launch with `interaction_mode=headless`.
@@ -131,8 +140,9 @@ No `gc` code is needed, but it's a fork in all but name.
 - **Patch them per rig** (Documented): `[[rigs.patches]]` with `max_active_sessions` and `option_defaults = { model, effort }`.
 - **The misrouting and the ~50-second idle churn are one bug** (Code-read; upstream #6461, with #6932 for the outer root; both open on main). The spec says a workflow root is controller-owned and blocked until finalize. The code stamps every graph root `gc.routed_to` and doesn't block it. So each drain item's root is claimable by the worker pool, and counts as pool demand, from the moment it's created (gotchas 17 and 22). An upstream comment reproduces it on 1.5.0 with this pack and formula.
   - **Interim workaround** (from the issue thread, not the docs): an order that unsets `gc.routed_to` on expanded workflow roots.
+  - **Run C:** I removed the route in each item's prepare step instead. Workers still claimed roots in the seconds before prepare ran, in every phase. The workaround keeps a declined root from being claimed again, and finalize closes it, so it limits the damage without preventing the claim (gotcha 27).
   - Pool caps and lower effort bound the cost but don't stop the churn. No interval setting addresses it.
-- **No spend budget exists** (Undocumented; checked on 1.5.0 and main). There is no config field, flag or order setting for one; `gc`'s budgets are time, wake and attempt budgets. The nearest workaround: `[usage] provider = "exec:<script>"`, with a script that sums cost per run and calls `gc suspend` at a threshold. That stops writing `.gc/usage.jsonl`, so `gc costs` goes blank unless the script also writes it.
+- **No spend budget exists** (Undocumented; checked on 1.5.0 and main). There is no config field, flag or order setting for one; `gc`'s budgets are time, wake and attempt budgets. The nearest workaround: `[usage] provider = "exec:<script>"`, with a script that sums cost per run and calls `gc suspend` at a threshold. That stops writing `.gc/usage.jsonl`, so `gc costs` goes blank unless the script also writes it. **Run C:** confirmed: `gc costs` printed "No usage facts recorded yet" in every run. Also, `gc` 1.5.0's model usage facts carry no city field, so a sink that files facts by city puts them under an unknown city. And the sink's total read 2.9× to 4.9× below a transcript-priced count (gotcha 32), so enforce a cap from transcripts.
 - **`gc costs` shows $0 for newer models** (Documented and Code-read). Built-in prices stop at `claude-opus-4-8`, and unpriced calls are left out of the total. Add a `[[pricing]]` entry. Treat the result as a floor: the usage design doc lists ways it undercounts against transcripts.
 - **The review loop's 6** (Code-read): `build-basic-review` hardcodes `max_attempts = 6` and never reads the `max_iterations` variable (gotcha 19).
 
@@ -147,6 +157,7 @@ No `gc` code is needed, but it's a fork in all but name.
   - **Fix:** install PyYAML into that interpreter's main site-packages.
   - **Verify:** `env -i PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin HOME=/tmp python3 -c 'import yaml'`.
   - The install docs never mention Python. That gap is tracked in gascity-packs#340, still open.
+- **Run C: the pack commit that fixes the check scripts needs bash 4.** One review check at that commit lowercases with `${known,,}`, which macOS's `/bin/bash` 3.2 rejects as "bad substitution" (the line is Code-read; the shell error is Observed). Without bash 4 or newer first on the check PATH, every implementation review fails its gate. I installed Homebrew bash, which leads the check PATH because the supervisor's PATH puts `/opt/homebrew/bin` first. Verify with `env -i HOME=<city-dir> PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin bash -c 'x=A; echo "${x,,}"'`, which should print `a`.
 - **A failed check still releases its dependents** (Code-read; Contradicted by the published guide, which says exhaustion "blocks downstream work"). Downstream steps run anyway, then `workflow-finalize` fails the whole run. The fix-closed change is PR #7174, still open. Retry counts come from the formula's `max_attempts`; change them by shadowing the formula. Exit code 75 re-runs without spending an attempt (Documented).
 
 ## Safety
@@ -160,18 +171,21 @@ No `gc` code is needed, but it's a fork in all but name.
 
 - `gc events --follow` and `--type`, for example `--type execution.step_stalled` (Documented flags; that event type isn't listed in the docs).
 - **Check failures:** `gc.attempt_log` on the step's control bead, and `.gc/runtime/control-dispatcher-trace.log` (Code-read). `gc trace` covers only the session reconciler, not workflow steps.
+- **Suspension state** (Run C): `gc status` lags `.gc/runtime/suspension-state.json` by seconds in both directions. Trust the file.
 - **Following an agent:** `gc session logs <session> -f`, `peek` or `attach` (Documented). `-f` picks its transcript file once at start, so re-run it after a worker changes Claude session id (Code-read, untested; gotcha 24).
 
 ## Long unattended runs
 
-- **Sleep** (Undocumented). Nothing covers host sleep, and `gc` takes no power assertion. The launchd service only restarts the supervisor after a crash. Keep the host awake with `caffeinate -dimsu` or `pmset`.
+- **Sleep** (Undocumented). Nothing covers host sleep, and `gc` takes no power assertion. The launchd job only restarts the supervisor after a crash. Keep the host awake with `caffeinate -dimsu` or `pmset`. **Run C:** plugging in wasn't enough, because the AC power profile also slept after a minute. A sleep that cuts an API call leaves the agent idle holding its claim, and the execution backstop then re-dispatches the step (gotcha 29).
+- **The execution backstop** (Code-read and Observed in Run C; upstream #6748). About 3 minutes of quiet tmux pane on a worker holding a claim counts as a stall, and the backstop drains the session even while a background job runs in it. No config key turns it off, and a nudge only delays it, because pane activity never resets its attempt count. The docs don't describe it. A prompt rule against ending a turn with a background job running stopped the kills (gotcha 28).
+- **No per-step retry** (Undocumented; Run C). I found no command to rerun one failed step, and a re-sling pours the whole formula again. Setting the failed step's bead back to open got it claimed and run, even under a closed root (gotcha 31).
 - **Usage limits** (Code-read). A usage-limit dialog at session start is dismissed, and the session is marked `sleep_reason=rate_limit`. A limit hit mid-turn is left to Claude Code (gotcha 26).
 - **Restarts resume** with `--resume <session-id>`, and step state lives in beads (Code-read and Documented).
 
 ## Teardown and a second city
 
-- **`gc stop` also unregisters the city** (Documented). It stops agents and Dolt too. `gc unregister` leaves sessions running. `gc rig remove` only edits `city.toml` and `site.toml`. `gc import prune` clears unreferenced pack cache.
-- **No documented "delete and start fresh" procedure.** Nothing covers the city directory, a rig's `.beads/`, the `bd init` commit, a rig's `.gc/` and `worktrees/`, or orphan Dolt databases. Under the default proxied Dolt, any `bd` read restarts Dolt, so a stray `bd` command can bring a stopped city's database back.
+- **`gc stop` also unregisters the city** (Documented; Observed in Run C, gotcha 34). It stops agents and Dolt too. `gc unregister` leaves sessions running. `gc rig remove` only edits `city.toml` and `site.toml`. `gc import prune` clears unreferenced pack cache.
+- **No documented "delete and start fresh" procedure.** Nothing covers the city directory, a rig's `.beads/`, the `bd init` commit, a rig's `.gc/` and `worktrees/`, or orphan Dolt databases. Under the default proxied Dolt, any `bd` read restarts Dolt, so a stray `bd` command can bring a stopped city's database back. **Run C:** two Dolt servers restarted right after the cities were stopped and had to be stopped by signal.
 - **Two cities can share a machine** (Documented): one supervisor, one API port, a tmux server per city. But `gc init` or `gc register` beside a running city can kill and respawn the supervisor, which cycles the other city's in-flight work (Code-read). Pass `--city` everywhere.
 
 ---
@@ -188,6 +202,8 @@ No `gc` code is needed, but it's a fork in all but name.
 8. Whether a provider-config change restarts an already-running mayor.
 9. How to delete a city and its proxied Dolt data so it can be recreated at the same path.
 10. Which `gascity` pack revisions are compatible with which `gc` releases.
+11. How to tune or turn off the execution backstop's quiet-pane drain.
+12. Whether `gc` has, or plans, a way to retry one failed step.
 
 ## Sources
 

@@ -1,12 +1,15 @@
 # Setup gotchas
 
-The traps I hit getting Gas City ready to build a spec and then running that build through two milestones, with what fixed each one. Entries 1–16 are setup. Entries 17–26 came from the build itself.
+The traps I hit getting Gas City ready to build a spec and then running that build, with what fixed each one. Entries 1–16 are setup. Entries 17–26 came from the first run's two milestones. Entries 27–37 came from the reconfigured run, its recovery and the teardown ([results](../experiments/two-driver-results.md#run-c-gas-city-reconfigured)).
 
-- **Versions:** `gc` 1.5.0 (Homebrew), Claude Code 2.1.293 at setup and 2.1.296 by milestone 2 (it auto-updated mid-run), macOS with launchd.
-- **Dates:** 2026-10-05 to 2026-10-10 (UTC).
+- **Versions:** `gc` 1.5.0 (Homebrew), Claude Code 2.1.293 at setup and 2.1.296 from the first run's milestone 2 on (it auto-updated mid-run), macOS with launchd.
+- **Dates:** 2026-10-05 to 2026-10-15 (UTC).
 - **Pack:** the `gascity` template's pack, pinned by `gc` 1.5.0 to `sha:3b3b89f2011e06d84459aa7bea1552382f13930a`.
+- **Pack for entries 27–37:** pre-release pack main, the first commit that fixes the check-script paths ([what-the-docs-say.md](what-the-docs-say.md#checks)), with overrides in my own fork of the pack.
 
 Each entry says how I know it. **Observed** means I hit it on a live city. **Code-read** means I read it in the `gc` source or the pinned pack and haven't watched it happen. Treat code-read entries as leads to check.
+
+Entries 27–37 also carry a **class**: a **Gas City defect**, **configuration** (how Gas City is meant to be set up, or a design you have to plan around), or **my mistake** (something I set up wrong or should have caught).
 
 Throughout, a Claude Code session ran `gc` for me. Several of these traps exist only because of that.
 
@@ -310,6 +313,145 @@ This came from the default template and pack. A hand repair of my rig import (#1
 
 ---
 
+## 27. The workflow-root claim race survives the #6461 workaround
+
+**Symptom.** The reconfigured run used the issue thread's workaround for #17: the item's prepare step removes `gc.routed_to` from its workflow root. Implementation workers still claimed roots. The claimer declined the root as a latch bead and sat idle holding it, and `gc` raised `execution.step_stalled` 3 to 5 minutes later. Another worker did the real work meanwhile.
+
+**Cause.** The same upstream bug as #17, [gastownhall/gascity#6461](https://github.com/gastownhall/gascity/issues/6461). Claims landed 3 to 25 seconds after the previous unit closed, before the next item's prepare step ran, so a workaround placed at prepare can't remove the route in time.
+
+**Fix.** None in 1.5.0. The workaround still limits the damage. Once the route is gone, the orphan sweep reopens the root, nobody claims it again, and the item's workflow-finalize closes it whatever its status (code-read). So leave the root alone. Each race costs one idle session for a few minutes and blocks no work.
+
+**How I verified.** Observed in every phase: 5 races in 8 items at milestone 1 (4 of them stalled), 3 stalls at milestone 2, 3 in the recovery and 1 in the third attempt. Every root closed `pass` with its item, and none needed a human. The finalize behavior was read in the `gc` 1.5.0 source before I relied on it.
+
+**Class.** Gas City defect. The workaround lives in my pack fork.
+
+## 28. The execution backstop kills an active worker after about 3 minutes of quiet pane
+
+**Symptom.** A worker starts a long job (a batch, a gate run) in a background shell and ends its turn to wait. About 3 minutes later `gc` raises `execution.step_stalled`, kills the worker's tmux session and re-dispatches the step to a fresh process with no context. The background job dies with the session.
+
+**Cause.** `gc`'s execution backstop treats about 3 minutes of quiet tmux pane on a pool worker holding a claim as a stall. With no `nudge` configured it escalates at once, drains the session, and assigned work can't cancel the drain. A background shell doesn't count as pane activity. No config key turns the backstop off, and a nudge only delays the drain, because pane activity never resets its attempt count (code-read in the `gc` 1.5.0 source). Upstream: [gastownhall/gascity#6748](https://github.com/gastownhall/gascity/issues/6748), where another city reports 267 drains in about 21 hours.
+
+**Fix.** Shadow every live step prompt with a rule: never end a turn while a background job runs; wait in the foreground, or start the job under `nohup` with output to a file and check it in short foreground steps. I added that text to all 12 live step prompts in my fork before milestone 2. After that, one worker ran a 3 h 11 m batch in a single turn without a kill.
+
+**How I verified.** Observed twice at milestone 1: a live batch and, later, a gate rerun were killed, and `gc`'s own events show the kill. The mechanism is code-read. It seemed to fire once per claim, since a re-dispatched claim of the same bead didn't fire again, but that's two observations, not proof. With the shadow in place there were no kills of active work across milestone 2, the recovery and the third attempt. An early reading put the threshold at 90 seconds; I corrected it to about 3 minutes from the source and the observed timing.
+
+**Class.** Gas City defect.
+
+## 29. Host sleep cuts an API call mid-turn, and the backstop recovers the idle claim
+
+**Symptom.** A step stalls. The agent's pane shows "API Error: Your computer went to sleep mid-response. The response above may be incomplete." Its turn ended there, idle, still holding the claim. A few minutes later `gc` kills the session, re-dispatches the step, and the step is redone.
+
+**Cause.** The Mac slept. I had waived keeping it awake on the belief that AC power was enough. It wasn't: the AC power profile also had a 1-minute sleep. Agents ran `caffeinate` on their own, and Claude Code holds a short `caffeinate -i` while busy, but neither held a closed lid on battery or woke a Mac already in maintenance sleep.
+
+**Fix.** Keep the host awake for the whole run. Check `pmset -g` for the sleep setting on both AC and battery, run `caffeinate -dimsu` for the run's length, and keep the lid open. Once the host has slept, the backstop's recovery is the right behavior: the step reruns from scratch, which costs only that step.
+
+**How I verified.** Observed twice: at milestone 2 (about 3 minutes redone) and in the recovery (about 5 minutes redone). Sleep waits from `pmset -g log`: 29 m 23 s at milestone 1, 69 m 33 s in four spans at milestone 2, and 29 m 35 s in the recovery.
+
+**Class.** My mistake. The backstop's recovery worked as designed here.
+
+## 30. The final report lands untracked where an item commits, so integrate collides
+
+**Symptom.** Integrate fails: "git would overwrite untracked plugins/…/build-recovery/factory-run.md". Seven of eight items merged locally, the last didn't, and publish refused with `no_integrated_commit`. Nothing was pushed.
+
+**Cause.** `build-basic` writes its run records, including the build-level final report at `gc.build.final_report_path`, untracked into the rig checkout under `artifact_root`. The gate item committed its own record at that same path on its item branch. Integrate merges in the rig checkout, where the untracked file blocks the merge. A related layout trap: stage artifacts (requirements, plan) sit untracked in the rig checkout, so item worktrees don't contain them, and agents read them by absolute path.
+
+**Fix.** Before each run, copy the previous run's records out of the rig checkout and clear the artifact root, or use a fresh `artifact_root` per run. Tell items not to commit at the final report's path, or point `final_report_path` outside the checkout. After a collision: copy the file out, remove only the colliding file, and reopen integrate and publish (#31).
+
+**How I verified.** Observed in the recovery. At prep I copied the previous run's records out but didn't clear the checkout, though the risk had been named. Finalize saw the collision and wrote its own report under a different name. For the third attempt the path was cleared, and integrate passed.
+
+**Class.** Gas City defect in the build layout, plus my mistake: the risk was known before launch.
+
+## 31. There's no per-step retry, so reopen the failed step's bead
+
+**Symptom.** A step fails for a reason you've since fixed, such as #30. There's no command to rerun just that step, and a re-sling pours the whole formula again.
+
+**Cause.** In `gc` 1.5.0, step state lives in beads, and I found no step-retry command. A re-sling reruns every stage from requirements on. For the recovery that would have cost about $100 and likely conflicted with the existing item branches.
+
+**Fix.** Workaround: set the failed step's bead back to open with `bd`. Pool dispatch claimed it within about 30 seconds, even though the workflow root was already closed, and Gas City's own agents ran the step. Reopen one step at a time and wait for each to close. The root stays recorded `fail`, and the reopened bead keeps stale metadata from its first attempt (here, the old publish reason). Label any delivery made this way as human-assisted.
+
+**How I verified.** Observed once, in the recovery: integrate was reopened and passed, then publish was reopened and pushed. I haven't checked whether a newer `gc` has a retry.
+
+**Class.** Gas City defect (a missing feature).
+
+## 32. Gas City's own usage figure undercounts, so price the cap from transcripts
+
+**Symptom.** Gas City's usage figure read far below a transcript-priced count of the same window: $24.63 against $94.14 at milestone 1, $37.45 against $109.19 at milestone 2, $27.53 against $98.73 in the recovery and $6.42 against $31.64 in the third attempt, 2.9× to 4.9× low. It also lags: during one long session it stayed flat for 10 minutes, then caught up when the session exited. `gc costs` printed "No usage facts recorded yet" throughout.
+
+**Cause.** Two upstream bugs: pool sessions that exit through `drain-ack` send only a few usage facts ([gastownhall/gascity#6672](https://github.com/gastownhall/gascity/issues/6672)), and usage rows are flushed on the next wake ([gastownhall/gascity#5825](https://github.com/gastownhall/gascity/issues/5825)). Two more things widen the gap:
+
+- `gc` 1.5.0's model usage facts carry no city field, so my exec usage sink wrote them to an unknown-city file, not the city's.
+- The transcript count includes the driver session watching the run, which Gas City can't see. So part of the gap isn't undercounting.
+
+`gc costs` goes blank because an exec usage sink replaces the file it reads.
+
+**Fix.** Enforce any spend cap from transcripts. My collector priced every agent transcript every 5 minutes and would have called `gc suspend` at $200; Gas City's figure was recorded beside it. No run reached the cap.
+
+**How I verified.** Observed in all four runs. The lag matches #5825's shape.
+
+**Class.** Gas City defect.
+
+## 33. An in-run advisor rewrote history below the target branch's tip, so integrate failed
+
+**Symptom.** Integrate fails with add/add conflicts in six files that no two items should both add. Seven items merge and the last doesn't, so nothing is delivered.
+
+**Cause.** My advisor step ruled that a tracked `.beads/` directory, present on the branch from a setup commit, should come out of history. The fix worker rewrote every commit down past the target branch's tip, so that tip was no longer an ancestor of the item branch. The other items' branches were on the old history, and the rewritten branch carried the same files under new commits. The rewrite also removed the rig's tracked `bd` config from the branch, so before milestone 2 I had to restore those files on disk as ignored files for `bd` to reach the bead store.
+
+**Fix.** Tell any advisor or fix step that commits reachable from the target branch are fixed and must never be rewritten. Remove an unwanted tracked file in a new commit. A `git merge-tree` dry run of the item branches against the target predicts this before integrate runs.
+
+**How I verified.** Observed at milestone 1. A read-only `git merge-tree` forecast named the six conflicting files before integrate ran, and integrate failed on exactly those.
+
+**Class.** My mistake: my advisor override had no rule protecting the target branch. The ruling itself was the agent's judgment.
+
+## 34. `gc stop` unregisters the city, and Dolt restarts on any later `bd` read
+
+**Symptom.** After `gc stop`, `gc cities` prints "No cities registered". Separately, Dolt servers came back right after the stops.
+
+**Cause.** Both are documented. `gc stop` also unregisters the city. Under the default proxied Dolt, any `bd` read starts Dolt again ([what-the-docs-say.md](what-the-docs-say.md#teardown-and-a-second-city)).
+
+**Fix.** Tear down in this order: `gc stop` on each city, then `gc supervisor stop --wait`, then look for leftover Dolt processes and stop them. Run no `bd` command afterward. Write each city's path down first, because `gc cities` won't list it once stopped.
+
+**How I verified.** Observed at teardown on 2026-10-15: "Unregistered city … City stopped", then "No cities registered". Two Dolt servers restarted right after the stops and had to be stopped by signal. Nothing was deleted.
+
+**Class.** Configuration (documented behavior).
+
+## 35. The supervisor is a launchd job, so closing your sessions stops nothing
+
+**Symptom.** I closed every Claude Code session tied to the run, but both cities kept running: the mayors stayed up and the supervisor process stayed alive. Left idle overnight, one city logged 9,472 events, all of them its own patrols (orders firing, beads maintenance cycles), and no work.
+
+**Cause.** The supervisor is a per-user launchd job, `com.gascity.supervisor`, that runs every registered city regardless of any terminal or session ([how-gas-city-works.md](../concepts/how-gas-city-works.md#the-parts)).
+
+**Fix.** Stop it explicitly (#34). `gc supervisor stop --wait` leaves the launchd job disabled with its plist untouched. It comes back on `gc supervisor install` or `gc start`.
+
+**How I verified.** Observed: the cities were still up after the sessions closed, and the overnight event count came from `gc events`.
+
+**Class.** Configuration (by design). My expectation was wrong.
+
+## 36. Agents can edit what grades them
+
+**Symptom.** A worker whose gate is failing edits the product's scoring prompt so claim validity is scored without web verification, though the gate's baselines were scored with it. Nothing stops it.
+
+**Cause.** There's no confinement (#10). A worker can edit any file in its worktree, including graders, goldens and baselines.
+
+**Fix.** A PreToolUse fence hook in `<city-dir>/.claude/settings.json` that blocks writes to the goldens, the baselines and the fixture manifest. I left the product's prompts and eval code editable, because the spec required eval-code changes, and logged every edit to them with its diff. Read the fence back in `.gc/settings.json` after the first session starts, since the merge lands at start.
+
+**How I verified.** Observed: the edit happened at milestone 1, before the fence. With the fence in place from milestone 2 on, a watcher found no write to a fenced path in any later run.
+
+**Class.** Configuration.
+
+## 37. A stock alert reports a normal build's bead growth as an escalation
+
+**Symptom.** The human mailbox receives "ESCALATION: JSONL spike detected [HIGH]", with a bead-store growth of 27% to 43% against a 20% threshold. Nothing is stalled or waiting.
+
+**Cause.** A stock city order alerts on fast bead-store growth, and a build creates beads fast.
+
+**Fix.** Expect it. Record the mailbox's contents before the run so new messages stand out, and batch these alerts instead of treating each as a stall.
+
+**How I verified.** Observed: two at milestone 1, one at milestone 2 and one during a setup smoke test.
+
+**Class.** Configuration (a noisy default).
+
+---
+
 ## Observed, not yet explained
 
 - `ready_delay_ms` resolves to `10000` from `builtin:claude` even though `city.toml` sets `0`. `gc config explain --provider claude` shows it.
@@ -319,7 +461,7 @@ This came from the default template and pack. A hand repair of my rig import (#1
 
 ## Sources
 
-These are the private notes behind this page. "Setup log" is the experiment's setup record. "Incident review" is the write-up of the failed first launch. "Runbook" is the step-by-step setup procedure the log follows. "Research" refers to two read-only passes over the `gc` 1.5.0 docs, source and pinned pack. "Run log" is the Gas City driver's minute-by-minute record of the build, with milestone 1 on 2026-10-08 and milestone 2 on 2026-10-09. "Comparison record" is the experiment's shared log of both sides. "Misroute trace" (2026-10-10) and "check-scripts research" (2026-10-08) are read-only investigations of the `gc` 1.5.0 source and pinned pack. "Milestone-1 write-up" is the measured comparison behind [two-driver-results.md](../experiments/two-driver-results.md).
+These are the private notes behind this page. "Setup log" is the experiment's setup record. "Incident review" is the write-up of the failed first launch. "Runbook" is the step-by-step setup procedure the log follows. "Research" refers to two read-only passes over the `gc` 1.5.0 docs, source and pinned pack. "Run log" is the Gas City driver's minute-by-minute record of the build, with milestone 1 on 2026-10-08 and milestone 2 on 2026-10-09. "Comparison record" is the experiment's shared log of both sides. "Misroute trace" (2026-10-10) and "check-scripts research" (2026-10-08) are read-only investigations of the `gc` 1.5.0 source and pinned pack. "Milestone-1 write-up" is the measured comparison behind [two-driver-results.md](../experiments/two-driver-results.md). For entries 27–37, "run C logs" are the reconfigured run's driver records for milestone 1 (2026-10-11), milestone 2 (2026-10-12), the recovery (2026-10-12 to 13) and the third attempt (2026-10-14). "Rulings" are an advisor session's filed decisions during that run. "Teardown log" is the record of stopping Gas City on 2026-10-15.
 
 | # | Gotcha | Source |
 |---|---|---|
@@ -349,4 +491,15 @@ These are the private notes behind this page. "Setup log" is the experiment's se
 | 24 | Dispatcher restarts; worker session ids change | Run log, milestone 1 (11:28 and 11:36 MST restarts) and milestone 2 (14:00–14:15 MST session id change, false stall) |
 | 25 | `claude plugin eval` sandbox stops the CLI | Run log, milestone 2 (14:00 MST worker report; gate checkpoint, layer 3); comparison record, milestone 2 (other driver's evals 8/8) |
 | 26 | Shared usage limit pauses every agent | Run log, milestone 1 (stall #1, 14:06–15:34 MST; Mac sleep from `pmset`); comparison record (88-minute exclusion) |
+| 27 | Claim race survives the #6461 workaround | Run C logs, every phase (stall tables); comparison record, milestone 1 (claim timing, 3–25 s); a read-only source read of workflow-finalize |
+| 28 | Execution backstop kills active work | Run C logs, milestone 1 (two kills, pane-activity samples); a read-only read of the `gc` 1.5.0 execution backstop source; rulings on the stall; comparison record (threshold correction, milestone-2 batch with no kill) |
+| 29 | Host sleep cuts an API call mid-turn | Run C logs, milestone 2 and recovery (stall, `pmset -g log` waits); comparison record (AC power profile) |
+| 30 | Untracked final report collides at integrate | Run C logs, recovery (integrate close reason, finalize note); rulings on the integrate failure; run C logs, milestone 1 (untracked stage artifacts) |
+| 31 | No per-step retry; reopen the bead | Comparison record, recovery delivery retry (re-sling rejected, reopen, claim timing); run C logs, recovery |
+| 32 | Usage figure undercounts | Run C logs, all four runs (spend samples, sink copies per window); the run's spend-cap method, written before the run |
+| 33 | Advisor rewrote history below the target tip | Run C logs, milestone 1 (advisor rulings, rewrite, integrate close reason); comparison record (`merge-tree` forecast, `bd` config restore); rulings after milestone 1 |
+| 34 | `gc stop` unregisters; Dolt restarts | Teardown log; comparison record, 2026-10-15 |
+| 35 | Supervisor is a launchd job | Teardown log; run C logs, third attempt (overnight event count) |
+| 36 | Agents can edit what grades them | Run C logs, milestone 1 (prompt edit) and later runs (fence watch); rulings on the fence |
+| 37 | Stock growth alert | Run C logs, milestones 1 and 2 (mailbox tables) |
 | — | `ready_delay_ms`, `bead cache unavailable` | Setup log §5.6 and §5.7 |
